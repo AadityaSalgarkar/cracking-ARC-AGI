@@ -1,0 +1,28 @@
+# Configuration file for ARC spatial reasoning model
+
+# Grid and sequence parameters
+create_spatial_reasoning_model.H = 10
+create_spatial_reasoning_model.W = 10  
+create_spatial_reasoning_model.C = 11
+create_spatial_reasoning_model.n_seq = 100
+
+# Maximum grid dimensions for coordinate transformations  
+# (Note: These are not used by main.py but included for completeness)
+# create_coordinate_tensor.H_max = 30
+# create_coordinate_tensor.W_max = 30
+# transform_grid_with_coordinates.H_max = 30
+# transform_grid_with_coordinates.W_max = 30
+# create_augmented_dataset.H_max = 30
+# create_augmented_dataset.W_max = 30
+
+# Model architecture parameters
+create_spatial_reasoning_model.embed_dim = 256
+create_spatial_reasoning_model.num_heads = 8
+create_spatial_reasoning_model.num_layers = 6
+create_spatial_reasoning_model.ff_dim = 1024
+create_spatial_reasoning_model.dropout = 0.1
+
+# Sequence generator parameters
+create_spatial_reasoning_model.base = 10000
+generate_sequence_with_rope.n_seq = 100
+generate_sequence_with_rope.embed_dim = 256

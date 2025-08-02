@@ -1,0 +1,12 @@
+modify rope_self_attn.py to accomodate 4 rope modules created by sequence_gen.py  function:
+
+def create_rope_modules(H, W, embed_dim, base=10000):
+    """Create 4 RoPE modules for rotational variants."""
+    rope_shape = (H, W, embed_dim)
+    rope_normal = RoPENd(rope_shape, base=base)
+    rope_flip_i = RoPENd(rope_shape, base=base)
+    rope_flip_both = RoPENd(rope_shape, base=base)
+    rope_flip_j = RoPENd(rope_shape, base=base)
+
+    return (rope_normal, rope_flip_i, rope_flip_both, rope_flip_j)
+
