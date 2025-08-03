@@ -7,13 +7,17 @@ and PuzzleShape visualization capabilities.
 
 import os
 import sys
+from pathlib import Path
 
+import pytest
 import torch
 
 # Add parent directory to path to import modules
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+test_dir = Path(__file__).parent
+project_dir = test_dir.parent
+sys.path.insert(0, str(project_dir))
 
-from classes import PuzzleShape
+from layers.classes import PuzzleShape
 from puzzles.create_puzzle import create_shift_puzzle
 
 
@@ -142,6 +146,7 @@ class TestPuzzleVisualization:
         assert output_numpy.min() >= 0
         assert output_numpy.max() <= 10  # C-1 = 10 for padding areas
 
+    @pytest.mark.visualization
     def test_end_to_end_puzzle_workflow(self):
         """Test complete workflow from puzzle creation to visualization preparation."""
         print("\n" + "=" * 60)
@@ -229,6 +234,7 @@ class TestPuzzleVisualization:
         print("=" * 60)
 
 
+@pytest.mark.visualization
 def test_puzzle_visualization_integration():
     """Integration test function that can be run directly."""
     test_instance = TestPuzzleVisualization()

@@ -4,7 +4,7 @@ from typing import List, Tuple, Optional
 import matplotlib.pyplot as plt
 import torch
 
-from layers.embeddings import create_sinusoidal_embedding
+from .positional_embeddings import create_sinusoidal_embedding
 
 
 @dataclass
