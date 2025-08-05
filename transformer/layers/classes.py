@@ -8,6 +8,31 @@ from .positional_embeddings import create_sinusoidal_embedding
 
 
 @dataclass
+class Coordinates:
+    """
+    Simple coordinate class with integer i and j positions.
+    """
+    i: int
+    j: int
+    
+    def __post_init__(self):
+        """Validate that i and j are integers."""
+        if not isinstance(self.i, int):
+            raise TypeError(f"i must be an integer, got {type(self.i)}")
+        if not isinstance(self.j, int):
+            raise TypeError(f"j must be an integer, got {type(self.j)}")
+    
+    def to_tuple(self) -> Tuple[int, int]:
+        """Convert to tuple representation."""
+        return (self.i, self.j)
+    
+    @classmethod
+    def from_tuple(cls, coords: Tuple[int, int]) -> "Coordinates":
+        """Create Coordinates from tuple."""
+        return cls(i=coords[0], j=coords[1])
+
+
+@dataclass
 class Cell:
     """
     Input class containing color and 4 position coordinate transformations.
@@ -21,10 +46,10 @@ class Cell:
     """
 
     Color: int
-    Position_1: Tuple[int, int]  # (i,j)
-    Position_2: Tuple[int, int]  # (H_max+H-1-i, j)
-    Position_3: Tuple[int, int]  # (H_max+H-1-i, W_max+W-1-j)
-    Position_4: Tuple[int, int]  # (i, W_max+W-1-j)
+    Position_1: Coordinates  # (i,j)
+    Position_2: Coordinates  # (H_max+H-1-i, j)
+    Position_3: Coordinates  # (H_max+H-1-i, W_max+W-1-j)
+    Position_4: Coordinates  # (i, W_max+W-1-j)
 
     # Cache for position embeddings to avoid recomputation in attention
     _cached_position_embedding: torch.Tensor = None
@@ -38,14 +63,12 @@ class Cell:
         if not isinstance(self.Color, int) or self.Color < 0:
             raise ValueError(f"Color must be non-negative integer, got {self.Color}")
 
-        # Validate positions are tuples of two integers
+        # Validate positions are Coordinates objects
         for i, pos in enumerate(
             [self.Position_1, self.Position_2, self.Position_3, self.Position_4], 1
         ):
-            if not isinstance(pos, tuple) or len(pos) != 2:
-                raise ValueError(f"Position_{i} must be tuple of length 2, got {pos}")
-            if not all(isinstance(x, int) for x in pos):
-                raise ValueError(f"Position_{i} must contain integers, got {pos}")
+            if not isinstance(pos, Coordinates):
+                raise ValueError(f"Position_{i} must be Coordinates object, got {type(pos)}")
 
     @classmethod
     def from_grid_position(
@@ -84,10 +107,10 @@ class Cell:
             raise ValueError(f"W={W} must be <= W_max={W_max}")
 
         # Compute the 4 coordinate transformations as specified in req.txt
-        position_1 = (i, j)
-        position_2 = (H_max + (H - 1 - i), j)
-        position_3 = (H_max + (H - 1 - i), W_max + (W - 1 - j))
-        position_4 = (i, W_max + (W - 1 - j))
+        position_1 = Coordinates(i, j)
+        position_2 = Coordinates(H_max + (H - 1 - i), j)
+        position_3 = Coordinates(H_max + (H - 1 - i), W_max + (W - 1 - j))
+        position_4 = Coordinates(i, W_max + (W - 1 - j))
 
         return cls(
             Color=color,
@@ -115,9 +138,9 @@ class Cell:
             Tuple of 4 tensors, each of shape (d_model,) for the 4 positions
         """
 
-        def create_pos_emb(pos_tuple, d_model, base):
-            """Create simple positional embedding from coordinate tuple."""
-            i, j = pos_tuple
+        def create_pos_emb(coords: Coordinates, d_model, base):
+            """Create simple positional embedding from Coordinates object."""
+            i, j = coords.i, coords.j
             pos_val = i * 1000 + j  # Simple encoding of 2D position
             return create_sinusoidal_embedding(pos_val, d_model, base)
 
@@ -781,7 +804,7 @@ class TransformerIO:
     def get_output_positions(self) -> torch.Tensor:
         """Get output sequence positions as tensor of (i,j) coordinates."""
         positions = [
-            cell.Position_1 for cell in self.output_sequence
+            (cell.Position_1.i, cell.Position_1.j) for cell in self.output_sequence
         ]  # All positions are the same (i,j)
         return torch.tensor(positions, dtype=torch.float)
 
@@ -796,7 +819,7 @@ class TransformerIO:
         """Get ground truth sequence positions as tensor of (i,j) coordinates."""
         if self.ground_truth is None:
             return None
-        positions = [cell.Position_1 for cell in self.ground_truth]
+        positions = [(cell.Position_1.i, cell.Position_1.j) for cell in self.ground_truth]
         return torch.tensor(positions, dtype=torch.float)
 
     def has_ground_truth(self) -> bool:

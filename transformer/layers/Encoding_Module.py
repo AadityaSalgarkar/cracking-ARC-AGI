@@ -12,6 +12,7 @@ import math
 import gin
 import torch
 import torch.nn as nn
+from .classes import Coordinates
 
 
 def create_2d_positional_embedding(i: int, j: int, d_positional_input: int, max_len: int = 10000) -> torch.Tensor:
@@ -50,6 +51,16 @@ def create_2d_positional_embedding(i: int, j: int, d_positional_input: int, max_
     return embedding
 
 
+@gin.configurable
+class CustomMHA(nn.Module):
+    """
+    Custom Multi-Head Attention module.
+    It works similarly to nn.MultiheadAttention but is designed for specific use cases. 
+    However, before the attention layer, it adds a constant positional embedding to the input.
+    This will be provided in the forward function of the module.
+    """
+
+    pass
 @gin.configurable
 class EncodingModule(nn.Module):
     """
@@ -174,6 +185,61 @@ class EncodingModule(nn.Module):
                 
         return pos_embeddings
     
+    def create_positional_embeddings_from_coordinates(
+        self,
+        coordinates_list: list[Coordinates],
+        H: int,
+        W: int
+    ) -> torch.Tensor:
+        """
+        Create positional embeddings from a list of Coordinates objects.
+        
+        Args:
+            coordinates_list: List of Coordinates objects
+            H: Height of current grid
+            W: Width of current grid
+            
+        Returns:
+            Tensor of shape [1, len(coordinates_list), d_model] with combined positional embeddings
+        """
+        ctx_len = len(coordinates_list)
+        device = next(self.parameters()).device
+        
+        # Prepare output tensor
+        pos_embeddings = torch.zeros(1, ctx_len, self.d_model, device=device)
+        
+        # Create the 4 coordinate transformations
+        for seq_idx, coord in enumerate(coordinates_list):
+            i, j = coord.i, coord.j
+            
+            # Transform 1: (i,j)
+            pos1 = create_2d_positional_embedding(
+                int(i), int(j), self.d_positional_input, self.max_len
+            ).to(device)
+            
+            # Transform 2: (H_max+H-1-i, j)
+            i2 = self.H_max + H - 1 - i
+            pos2 = create_2d_positional_embedding(
+                int(i2), int(j), self.d_positional_input, self.max_len
+            ).to(device)
+            
+            # Transform 3: (H_max+H-1-i, W_max+W-1-j)
+            j3 = self.W_max + W - 1 - j
+            pos3 = create_2d_positional_embedding(
+                int(i2), int(j3), self.d_positional_input, self.max_len
+            ).to(device)
+            
+            # Transform 4: (i, W_max+W-1-j)
+            pos4 = create_2d_positional_embedding(
+                int(i), int(j3), self.d_positional_input, self.max_len
+            ).to(device)
+            
+            # Concatenate 4 positional embeddings to create d_model tensor
+            combined_pos = torch.cat([pos1, pos2, pos3, pos4], dim=0)
+            pos_embeddings[0, seq_idx] = combined_pos
+            
+        return pos_embeddings
+    
     def forward(
         self, 
         colors: torch.Tensor, 
@@ -204,5 +270,44 @@ class EncodingModule(nn.Module):
         
         # Pass through transformer encoder
         encoded = self.transformer_encoder(embeddings)  # [batch_size, ctx_len, d_model]
+        
+        return encoded
+    
+    def forward_with_coordinates(
+        self,
+        colors: torch.Tensor,
+        coordinates_list: list[Coordinates],
+        H: int,
+        W: int
+    ) -> torch.Tensor:
+        """
+        Forward pass through encoding module using Coordinates objects.
+        
+        Args:
+            colors: Tensor of shape [ctx_len] with color values (0 to C-1)
+            coordinates_list: List of Coordinates objects with (i,j) positions
+            H: Height of current grid
+            W: Width of current grid
+            
+        Returns:
+            Encoded tensor of shape [1, ctx_len, d_model]
+        """
+        # Ensure colors tensor has batch dimension
+        if colors.dim() == 1:
+            colors = colors.unsqueeze(0)  # [1, ctx_len]
+        
+        # Get tied color embeddings
+        color_emb = self.color_embedding(colors)  # [1, ctx_len, d_model]
+        
+        # Create 2D positional embeddings with 4 transformations from Coordinates
+        pos_emb = self.create_positional_embeddings_from_coordinates(
+            coordinates_list, H, W
+        )  # [1, ctx_len, d_model]
+        
+        # Add color and positional embeddings
+        embeddings = color_emb + pos_emb  # [1, ctx_len, d_model]
+        
+        # Pass through transformer encoder
+        encoded = self.transformer_encoder(embeddings)  # [1, ctx_len, d_model]
         
         return encoded
