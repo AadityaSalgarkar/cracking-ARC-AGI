@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Training script for ARC Puzzle Transformer on actual ARC-AGI datasets.
+Training script for ARC Puzzle Transformer using PredictionModule.
 
 This script loads tasks from the ARC-1/ARC-2 datasets and trains the
-spatial reasoning transformer model with RoPE attention.
+PredictionModule with its three-stage architecture.
 """
 
 import json
@@ -14,6 +14,7 @@ from typing import List, Dict, Tuple, Optional
 import time
 from datetime import datetime
 
+import gin
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -21,9 +22,8 @@ from torch.utils.data import Dataset, DataLoader, random_split
 from torch.optim.lr_scheduler import CosineAnnealingLR
 import numpy as np
 
-from model import SpatialReasoningModel
+from layers import PredictionModule
 from classes import Puzzle
-from dataloader import TransformerIODataModule
 
 
 class ARCDataset(Dataset):
@@ -86,45 +86,133 @@ class ARCDataset(Dataset):
         return len(self.tasks)
         
     def __getitem__(self, idx):
-        task = self.tasks[idx]
+        return self.tasks[idx]
+
+
+class ARCDataLoader:
+    """Custom data loader for ARC tasks that creates batches for PredictionModule."""
+    
+    def __init__(self, dataset: ARCDataset, batch_size: int = 32, shuffle: bool = True):
+        self.dataset = dataset
+        self.batch_size = batch_size
+        self.shuffle = shuffle
         
-        # Convert to numpy arrays
-        input_grid = np.array(task['input'], dtype=np.int32)
-        output_grid = np.array(task['output'], dtype=np.int32)
+    def __len__(self):
+        return len(self.dataset) // self.batch_size
         
-        # Create Puzzle object
-        puzzle = Puzzle.from_grids(
-            input_grid, 
-            output_grid, 
-            H_max=30,  # ARC grids are max 30x30
-            W_max=30,
-            C=11  # ARC uses 11 colors (0-10)
-        )
+    def __iter__(self):
+        indices = list(range(len(self.dataset)))
+        if self.shuffle:
+            random.shuffle(indices)
+            
+        for i in range(0, len(indices) - self.batch_size + 1, self.batch_size):
+            batch_indices = indices[i:i + self.batch_size]
+            batch_data = [self.dataset[idx] for idx in batch_indices]
+            
+            # Process batch to create input/output tensors
+            batch_tensors = self._process_batch(batch_data)
+            yield batch_tensors
+            
+    def _process_batch(self, batch_data: List[Dict]) -> Dict[str, torch.Tensor]:
+        """Process batch data into tensors for PredictionModule."""
+        max_seq_len = 900  # 30x30 max grid size
+        batch_size = len(batch_data)
         
-        return puzzle
+        # Initialize lists to collect data
+        all_input_colors = []
+        all_input_positions = []
+        all_output_positions = []
+        all_target_colors = []
+        all_H = []
+        all_W = []
+        all_seq_lens = []
+        
+        for data in batch_data:
+            input_grid = np.array(data['input'], dtype=np.int32)
+            output_grid = np.array(data['output'], dtype=np.int32)
+            
+            H_in, W_in = input_grid.shape
+            H_out, W_out = output_grid.shape
+            
+            # Use output dimensions for both (simplified approach)
+            H, W = H_out, W_out
+            
+            # Flatten grids and create position tensors
+            input_colors = []
+            input_positions = []
+            output_colors = []
+            output_positions = []
+            
+            # Process input grid
+            for i in range(H_in):
+                for j in range(W_in):
+                    if i < H and j < W:  # Only if within output dimensions
+                        input_colors.append(input_grid[i, j])
+                        input_positions.append([i, j])
+                        
+            # Process output grid
+            for i in range(H_out):
+                for j in range(W_out):
+                    output_colors.append(output_grid[i, j])
+                    output_positions.append([i, j])
+                    
+            # Ensure we have matching lengths
+            seq_len = min(len(input_colors), len(output_colors))
+            
+            all_input_colors.append(torch.tensor(input_colors[:seq_len], dtype=torch.long))
+            all_input_positions.append(torch.tensor(input_positions[:seq_len], dtype=torch.float32))
+            all_output_positions.append(torch.tensor(output_positions[:seq_len], dtype=torch.float32))
+            all_target_colors.append(torch.tensor(output_colors[:seq_len], dtype=torch.long))
+            all_H.append(H)
+            all_W.append(W)
+            all_seq_lens.append(seq_len)
+            
+        # Pad sequences to max length in batch
+        max_len = max(all_seq_lens)
+        
+        # Create padded tensors
+        input_colors = torch.zeros(batch_size, max_len, dtype=torch.long)
+        input_positions = torch.zeros(batch_size, max_len, 2, dtype=torch.float32)
+        output_positions = torch.zeros(batch_size, max_len, 2, dtype=torch.float32)
+        target_colors = torch.zeros(batch_size, max_len, dtype=torch.long)
+        
+        for idx in range(batch_size):
+            seq_len = all_seq_lens[idx]
+            input_colors[idx, :seq_len] = all_input_colors[idx]
+            input_positions[idx, :seq_len] = all_input_positions[idx]
+            output_positions[idx, :seq_len] = all_output_positions[idx]
+            target_colors[idx, :seq_len] = all_target_colors[idx]
+            
+        # Use the most common H and W in the batch (simplified)
+        H = max(all_H)
+        W = max(all_W)
+        
+        return {
+            'input_colors': input_colors,
+            'input_positions': input_positions,
+            'output_positions': output_positions,
+            'target_colors': target_colors,
+            'H': H,
+            'W': W,
+            'seq_lens': torch.tensor(all_seq_lens, dtype=torch.long)
+        }
 
 
 def create_data_loaders(
     dataset_path: str,
     batch_size: int = 16,
-    n_seq: int = 128,
-    embed_dim: int = 128,
     train_split: float = 0.8,
     val_split: float = 0.1,
-    num_workers: int = 4,
     max_tasks: Optional[int] = None
-) -> Tuple[DataLoader, DataLoader, DataLoader]:
+) -> Tuple[ARCDataLoader, ARCDataLoader, ARCDataLoader]:
     """
     Create data loaders for ARC dataset.
     
     Args:
         dataset_path: Path to ARC dataset (e.g., "dataset/ARC-1")
         batch_size: Batch size for training
-        n_seq: Sequence length for TransformerIO format
-        embed_dim: Embedding dimension
         train_split: Fraction of data for training
         val_split: Fraction of data for validation
-        num_workers: Number of data loading workers
         max_tasks: Maximum number of tasks to load
         
     Returns:
@@ -139,46 +227,54 @@ def create_data_loaders(
     val_size = int(val_split * total_size)
     test_size = total_size - train_size - val_size
     
-    train_dataset, val_dataset, test_dataset = random_split(
-        dataset,
-        [train_size, val_size, test_size],
-        generator=torch.Generator().manual_seed(42)
-    )
+    # Create subset indices
+    indices = list(range(total_size))
+    random.shuffle(indices)
     
-    print(f"Dataset splits: {train_size} train, {val_size} val, {test_size} test")
+    train_indices = indices[:train_size]
+    val_indices = indices[train_size:train_size + val_size]
+    test_indices = indices[train_size + val_size:]
     
-    # Create TransformerIO data module
-    data_module = TransformerIODataModule(
-        train_puzzles=list(train_dataset),
-        val_puzzles=list(val_dataset),
-        test_puzzles=list(test_dataset),
-        n_seq=n_seq,
-        batch_size=batch_size,
-        embed_dim=embed_dim,
-        input_heuristic="random",
-        output_heuristic="random",
-        num_workers=num_workers
-    )
+    # Create subset datasets
+    train_dataset = ARCDataset.__new__(ARCDataset)
+    train_dataset.tasks = [dataset.tasks[i] for i in train_indices]
     
-    return (
-        data_module.train_dataloader(),
-        data_module.val_dataloader(),
-        data_module.test_dataloader()
-    )
+    val_dataset = ARCDataset.__new__(ARCDataset)
+    val_dataset.tasks = [dataset.tasks[i] for i in val_indices]
+    
+    test_dataset = ARCDataset.__new__(ARCDataset)
+    test_dataset.tasks = [dataset.tasks[i] for i in test_indices]
+    
+    print(f"Dataset splits: {len(train_dataset.tasks)} train, {len(val_dataset.tasks)} val, {len(test_dataset.tasks)} test")
+    
+    # Create data loaders
+    train_loader = ARCDataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+    val_loader = ARCDataLoader(val_dataset, batch_size=batch_size, shuffle=False)
+    test_loader = ARCDataLoader(test_dataset, batch_size=batch_size, shuffle=False)
+    
+    return train_loader, val_loader, test_loader
 
 
-def compute_accuracy(predictions: torch.Tensor, targets: torch.Tensor) -> float:
-    """Compute accuracy for color predictions."""
-    # predictions: (batch_size, n_seq, C) - logits
-    # targets: (batch_size, n_seq) - indices
+def compute_accuracy(predictions: torch.Tensor, targets: torch.Tensor, seq_lens: torch.Tensor) -> float:
+    """Compute accuracy for color predictions, accounting for sequence lengths."""
+    batch_size = predictions.shape[0]
+    total_correct = 0
+    total_count = 0
+    
     pred_indices = predictions.argmax(dim=-1)
-    correct = (pred_indices == targets).float()
-    return correct.mean().item()
+    
+    for b in range(batch_size):
+        seq_len = seq_lens[b].item()
+        correct = (pred_indices[b, :seq_len] == targets[b, :seq_len]).float().sum()
+        total_correct += correct.item()
+        total_count += seq_len
+        
+    return total_correct / max(total_count, 1)
 
 
 def train_epoch(
-    model: SpatialReasoningModel,
-    train_loader: DataLoader,
+    model: PredictionModule,
+    train_loader: ARCDataLoader,
     optimizer: optim.Optimizer,
     scheduler: Optional[CosineAnnealingLR],
     device: torch.device,
@@ -189,35 +285,35 @@ def train_epoch(
     model.train()
     
     total_loss = 0.0
-    total_color_loss = 0.0
-    total_position_loss = 0.0
-    total_color_acc = 0.0
-    num_batches = len(train_loader)
+    total_acc = 0.0
+    num_batches = 0
     
     start_time = time.time()
     
     for batch_idx, batch in enumerate(train_loader):
         # Move data to device
-        input_emb = batch["input_embeddings"].to(device)
-        gt_colors = batch["ground_truth_colors"].to(device)
-        gt_positions = batch["ground_truth_positions"].to(device)
+        input_colors = batch['input_colors'].to(device)
+        input_positions = batch['input_positions'].to(device)
+        output_positions = batch['output_positions'].to(device)
+        target_colors = batch['target_colors'].to(device)
+        seq_lens = batch['seq_lens'].to(device)
+        H = batch['H']
+        W = batch['W']
         
         # Zero gradients
         optimizer.zero_grad()
         
         # Forward pass
-        color_logits, positions = model.forward_from_embeddings(input_emb)
-        
-        # Compute losses
-        color_loss = nn.CrossEntropyLoss()(
-            color_logits.view(-1, color_logits.size(-1)),
-            gt_colors.view(-1)
+        logits, loss = model(
+            input_colors,
+            input_positions,
+            output_positions,
+            H, W,
+            target_colors
         )
-        position_loss = nn.MSELoss()(positions, gt_positions)
-        total = color_loss + position_loss
         
         # Backward pass
-        total.backward()
+        loss.backward()
         
         # Gradient clipping
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
@@ -226,10 +322,9 @@ def train_epoch(
         optimizer.step()
         
         # Update metrics
-        total_loss += total.item()
-        total_color_loss += color_loss.item()
-        total_position_loss += position_loss.item()
-        total_color_acc += compute_accuracy(color_logits, gt_colors)
+        total_loss += loss.item()
+        total_acc += compute_accuracy(logits, target_colors, seq_lens)
+        num_batches += 1
         
         # Log progress
         if (batch_idx + 1) % log_interval == 0:
@@ -237,10 +332,9 @@ def train_epoch(
             batches_per_sec = (batch_idx + 1) / elapsed
             
             print(
-                f"Epoch {epoch} [{batch_idx + 1}/{num_batches}] "
-                f"Loss: {total.item():.4f} "
-                f"(Color: {color_loss.item():.4f}, Pos: {position_loss.item():.4f}) "
-                f"Color Acc: {compute_accuracy(color_logits, gt_colors):.3f} "
+                f"Epoch {epoch} [{batch_idx + 1}/{len(train_loader)}] "
+                f"Loss: {loss.item():.4f} "
+                f"Acc: {compute_accuracy(logits, target_colors, seq_lens):.3f} "
                 f"Speed: {batches_per_sec:.1f} batch/s"
             )
     
@@ -250,10 +344,8 @@ def train_epoch(
         
     # Average metrics
     metrics = {
-        'train_loss': total_loss / num_batches,
-        'train_color_loss': total_color_loss / num_batches,
-        'train_position_loss': total_position_loss / num_batches,
-        'train_color_acc': total_color_acc / num_batches,
+        'train_loss': total_loss / max(num_batches, 1),
+        'train_acc': total_acc / max(num_batches, 1),
         'epoch_time': time.time() - start_time
     }
     
@@ -261,56 +353,52 @@ def train_epoch(
 
 
 def validate(
-    model: SpatialReasoningModel,
-    val_loader: DataLoader,
+    model: PredictionModule,
+    val_loader: ARCDataLoader,
     device: torch.device
 ) -> Dict[str, float]:
     """Validate model on validation set."""
     model.eval()
     
     total_loss = 0.0
-    total_color_loss = 0.0
-    total_position_loss = 0.0
-    total_color_acc = 0.0
+    total_acc = 0.0
     num_batches = 0
     
     with torch.no_grad():
         for batch in val_loader:
             # Move data to device
-            input_emb = batch["input_embeddings"].to(device)
-            gt_colors = batch["ground_truth_colors"].to(device)
-            gt_positions = batch["ground_truth_positions"].to(device)
+            input_colors = batch['input_colors'].to(device)
+            input_positions = batch['input_positions'].to(device)
+            output_positions = batch['output_positions'].to(device)
+            target_colors = batch['target_colors'].to(device)
+            seq_lens = batch['seq_lens'].to(device)
+            H = batch['H']
+            W = batch['W']
             
             # Forward pass
-            color_logits, positions = model.forward_from_embeddings(input_emb)
-            
-            # Compute losses
-            color_loss = nn.CrossEntropyLoss()(
-                color_logits.view(-1, color_logits.size(-1)),
-                gt_colors.view(-1)
+            logits, loss = model(
+                input_colors,
+                input_positions,
+                output_positions,
+                H, W,
+                target_colors
             )
-            position_loss = nn.MSELoss()(positions, gt_positions)
-            total = color_loss + position_loss
             
             # Update metrics
-            total_loss += total.item()
-            total_color_loss += color_loss.item()
-            total_position_loss += position_loss.item()
-            total_color_acc += compute_accuracy(color_logits, gt_colors)
+            total_loss += loss.item()
+            total_acc += compute_accuracy(logits, target_colors, seq_lens)
             num_batches += 1
     
     metrics = {
         'val_loss': total_loss / max(num_batches, 1),
-        'val_color_loss': total_color_loss / max(num_batches, 1),
-        'val_position_loss': total_position_loss / max(num_batches, 1),
-        'val_color_acc': total_color_acc / max(num_batches, 1)
+        'val_acc': total_acc / max(num_batches, 1)
     }
     
     return metrics
 
 
 def save_checkpoint(
-    model: SpatialReasoningModel,
+    model: PredictionModule,
     optimizer: optim.Optimizer,
     scheduler: Optional[CosineAnnealingLR],
     epoch: int,
@@ -339,32 +427,44 @@ def save_checkpoint(
     print(f"Saved checkpoint to {filename}")
 
 
+def setup_gin_config():
+    """Setup gin configuration for PredictionModule."""
+    gin_config = """
+    # PredictionModule configuration
+    PredictionModule.d_model = 256
+    PredictionModule.n_layers_1 = 2
+    PredictionModule.n_layers_2 = 3
+    PredictionModule.n_layers_3 = 2
+    PredictionModule.n_heads = 8
+    PredictionModule.d_ff = 1024
+    PredictionModule.dropout = 0.1
+    PredictionModule.C = 11
+    PredictionModule.H_max = 30
+    PredictionModule.W_max = 30
+    """
+    gin.parse_config(gin_config)
+
+
 def main():
     """Main training function."""
+    # Setup gin configuration
+    setup_gin_config()
+    
     # Training configuration
     config = {
         'dataset_path': 'dataset/ARC-1',
         'batch_size': 32,
-        'n_seq': 128,
-        'embed_dim': 128,
-        'num_heads': 8,
-        'encoder_layers': 4,
-        'thinking_layers': 4,
-        'decoder_layers': 4,
-        'ff_dim': 512,
-        'dropout': 0.1,
         'learning_rate': 1e-3,
         'num_epochs': 50,
         'warmup_epochs': 5,
         'weight_decay': 0.01,
         'max_tasks': None,  # Use all tasks
-        'checkpoint_dir': f'checkpoints/arc_transformer_{datetime.now().strftime("%Y%m%d_%H%M%S")}',
+        'checkpoint_dir': f'checkpoints/prediction_module_{datetime.now().strftime("%Y%m%d_%H%M%S")}',
         'log_interval': 10,
-        'save_interval': 5,
-        'num_workers': 4
+        'save_interval': 5
     }
     
-    print("ARC Puzzle Transformer Training")
+    print("ARC PredictionModule Training")
     print("=" * 50)
     print("Configuration:")
     for key, value in config.items():
@@ -385,11 +485,8 @@ def main():
     train_loader, val_loader, test_loader = create_data_loaders(
         dataset_path=config['dataset_path'],
         batch_size=config['batch_size'],
-        n_seq=config['n_seq'],
-        embed_dim=config['embed_dim'],
         train_split=0.8,
         val_split=0.1,
-        num_workers=config['num_workers'],
         max_tasks=config['max_tasks']
     )
     
@@ -398,19 +495,8 @@ def main():
     print(f"Test batches: {len(test_loader)}")
     
     # Create model
-    print("\nCreating model...")
-    model = SpatialReasoningModel(
-        embed_dim=config['embed_dim'],
-        num_heads=config['num_heads'],
-        encoder_layers=config['encoder_layers'],
-        thinking_layers=config['thinking_layers'],
-        decoder_layers=config['decoder_layers'],
-        ff_dim=config['ff_dim'],
-        dropout=config['dropout'],
-        H_max=30,
-        W_max=30,
-        C=11
-    ).to(device)
+    print("\nCreating PredictionModule...")
+    model = PredictionModule().to(device)
     
     total_params = sum(p.numel() for p in model.parameters())
     trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -450,13 +536,9 @@ def main():
         # Print epoch summary
         print(f"\nEpoch {epoch} Summary:")
         print(f"  Train Loss: {train_metrics['train_loss']:.4f}")
-        print(f"  Train Color Loss: {train_metrics['train_color_loss']:.4f}")
-        print(f"  Train Position Loss: {train_metrics['train_position_loss']:.4f}")
-        print(f"  Train Color Acc: {train_metrics['train_color_acc']:.3f}")
+        print(f"  Train Accuracy: {train_metrics['train_acc']:.3f}")
         print(f"  Val Loss: {val_metrics['val_loss']:.4f}")
-        print(f"  Val Color Loss: {val_metrics['val_color_loss']:.4f}")
-        print(f"  Val Position Loss: {val_metrics['val_position_loss']:.4f}")
-        print(f"  Val Color Acc: {val_metrics['val_color_acc']:.3f}")
+        print(f"  Val Accuracy: {val_metrics['val_acc']:.3f}")
         print(f"  Epoch Time: {train_metrics['epoch_time']:.1f}s")
         print(f"  Learning Rate: {optimizer.param_groups[0]['lr']:.6f}")
         
