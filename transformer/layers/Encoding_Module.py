@@ -15,6 +15,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from .classes import Coordinates
 
+@torch.no_grad()
 def create_2d_positional_embedding(i: int, j: int, d_positional_input: int, max_len: int = 10000) -> torch.Tensor:
     """
     Create 2D positional embedding for coordinates (i,j).
@@ -216,7 +217,7 @@ class CustomEncoderModule(nn.Module):
             ) for _ in range(n_layers)
         ])
         
-    def create_positional_embeddings(
+    def create_positional_embeddings_input(
         self, 
         positions: torch.Tensor, 
         H: int,
@@ -273,6 +274,54 @@ class CustomEncoderModule(nn.Module):
                 
                 # Concatenate 4 positional embeddings to create d_model tensor
                 combined_pos = torch.cat([pos1, pos2, pos3, pos4], dim=0)
+                pos_embeddings[batch_idx, seq_idx] = combined_pos
+                
+        return pos_embeddings
+    
+    def create_positional_embeddings_output(
+        self, 
+        positions: torch.Tensor, 
+        H: int,
+        W: int
+    ) -> torch.Tensor:
+        """
+        Create positional embeddings for output positions using only (i,j) coordinates.
+        
+        This creates embeddings of size d_model (4*d_positional_input) but uses only 
+        the single (i,j) coordinate without transformations, repeated 4 times.
+        
+        Args:
+            positions: Tensor of shape [batch_size, ctx_len, 2] with (i,j) coordinates
+            H: Height of current grid (included for API consistency, not used)
+            W: Width of current grid (included for API consistency, not used)
+            
+        Returns:
+            Tensor of shape [batch_size, ctx_len, d_model] with positional embeddings
+        """
+        batch_size, ctx_len, _ = positions.shape
+        device = positions.device
+        
+        # Extract i,j coordinates
+        i_coords = positions[:, :, 0]  # [batch_size, ctx_len]
+        j_coords = positions[:, :, 1]  # [batch_size, ctx_len]
+        
+        # Prepare output tensor
+        pos_embeddings = torch.zeros(batch_size, ctx_len, self.d_model, device=device)
+        
+        # Create embeddings using only (i,j) without transformations
+        for batch_idx in range(batch_size):
+            for seq_idx in range(ctx_len):
+                i = i_coords[batch_idx, seq_idx].item()
+                j = j_coords[batch_idx, seq_idx].item()
+                
+                # Create single positional embedding for (i,j)
+                single_pos = create_2d_positional_embedding(
+                    int(i), int(j), self.d_positional_input, self.max_len
+                ).to(device)
+                
+                # Repeat the same embedding 4 times to match d_model size
+                # This maintains API compatibility while using only (i,j)
+                combined_pos = torch.cat([single_pos, single_pos, single_pos, single_pos], dim=0)
                 pos_embeddings[batch_idx, seq_idx] = combined_pos
                 
         return pos_embeddings
@@ -355,7 +404,7 @@ class CustomEncoderModule(nn.Module):
         color_emb = self.color_embedding(colors)  # [batch_size, ctx_len, d_model]
         
         # Create 2D positional embeddings with 4 transformations
-        pos_emb = self.create_positional_embeddings(positions, H, W)  # [batch_size, ctx_len, d_model]
+        pos_emb = self.create_positional_embeddings_input(positions, H, W)  # [batch_size, ctx_len, d_model]
         
         # Add color and positional embeddings
         embeddings = color_emb + pos_emb  # [batch_size, ctx_len, d_model]
