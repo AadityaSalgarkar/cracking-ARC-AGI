@@ -12,8 +12,8 @@ import math
 import gin
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from .classes import Coordinates
-
 
 def create_2d_positional_embedding(i: int, j: int, d_positional_input: int, max_len: int = 10000) -> torch.Tensor:
     """
@@ -51,18 +51,112 @@ def create_2d_positional_embedding(i: int, j: int, d_positional_input: int, max_
     return embedding
 
 
-@gin.configurable
-class CustomMHA(nn.Module):
+class CustomTransformerEncoderLayer(nn.Module):
     """
-    Custom Multi-Head Attention module.
-    It works similarly to nn.MultiheadAttention but is designed for specific use cases. 
-    However, before the attention layer, it adds a constant positional embedding to the input.
-    This will be provided in the forward function of the module.
+    Custom Transformer Encoder Layer using standard nn.MultiheadAttention.
+    
+    Similar to nn.TransformerEncoderLayer but allows adding positional embeddings
+    before the attention computation.
     """
+    
+    def __init__(
+        self,
+        d_model: int,
+        n_heads: int,
+        d_ff: int,
+        dropout: float = 0.1,
+        activation: str = "gelu",
+        layer_norm_eps: float = 1e-5
+    ):
+        """
+        Initialize Custom Transformer Encoder Layer.
+        
+        Args:
+            d_model: Model dimension
+            n_heads: Number of attention heads
+            d_ff: Feed-forward dimension
+            dropout: Dropout probability
+            activation: Activation function ("gelu" or "relu")
+            layer_norm_eps: Layer norm epsilon
+        """
+        super().__init__()
+        
+        # Multi-head attention (supports flash attention internally in PyTorch 2.0+)
+        self.self_attn = nn.MultiheadAttention(
+            embed_dim=d_model,
+            num_heads=n_heads,
+            dropout=dropout,
+            batch_first=True
+        )
+        
+        # Feed-forward network
+        self.linear1 = nn.Linear(d_model, d_ff)
+        self.dropout = nn.Dropout(dropout)
+        self.linear2 = nn.Linear(d_ff, d_model)
+        
+        # Layer normalization
+        self.norm1 = nn.LayerNorm(d_model, eps=layer_norm_eps)
+        self.norm2 = nn.LayerNorm(d_model, eps=layer_norm_eps)
+        
+        # Dropout
+        self.dropout1 = nn.Dropout(dropout)
+        self.dropout2 = nn.Dropout(dropout)
+        
+        # Activation function
+        if activation == "gelu":
+            self.activation = F.gelu
+        elif activation == "relu":
+            self.activation = F.relu
+        else:
+            raise ValueError(f"Unsupported activation: {activation}")
+    
+    def forward(
+        self,
+        src: torch.Tensor,
+        positional_embedding: torch.Tensor = None,
+        src_mask: torch.Tensor = None,
+        src_key_padding_mask: torch.Tensor = None
+    ) -> torch.Tensor:
+        """
+        Forward pass through the encoder layer.
+        
+        Args:
+            src: Input tensor [batch_size, seq_len, d_model]
+            positional_embedding: Optional positional embedding to add before attention
+            src_mask: Optional source mask
+            src_key_padding_mask: Optional source key padding mask
+            
+        Returns:
+            Output tensor [batch_size, seq_len, d_model]
+        """
+        # Self-attention with residual connection and layer norm (pre-norm)
+        src_norm = self.norm1(src)
+        
+        # Add positional embedding before attention if provided
+        if positional_embedding is not None:
+            src_with_pos = src_norm + positional_embedding
+        else:
+            src_with_pos = src_norm
+            
+        attn_output, _ = self.self_attn(
+            query=src_with_pos,
+            key=src_with_pos,
+            value=src_with_pos,
+            attn_mask=src_mask,
+            key_padding_mask=src_key_padding_mask
+        )
+        src = src + self.dropout1(attn_output)
+        
+        # Feed-forward with residual connection and layer norm (pre-norm)
+        src_norm = self.norm2(src)
+        ff_output = self.linear2(self.dropout(self.activation(self.linear1(src_norm))))
+        src = src + self.dropout2(ff_output)
+        
+        return src
 
-    pass
+
 @gin.configurable
-class EncodingModule(nn.Module):
+class CustomEncoderModule(nn.Module):
     """
     Transformer with input ctx_len list of (i,j) positions as specified in req.txt.
     
@@ -112,17 +206,15 @@ class EncodingModule(nn.Module):
         # Tied embeddings for color
         self.color_embedding = nn.Embedding(C, d_model)
         
-        # Transformer encoder layers
-        encoder_layer = nn.TransformerEncoderLayer(
-            d_model=d_model,
-            nhead=n_heads,
-            dim_feedforward=d_ff,
-            dropout=dropout,
-            batch_first=True
-        )
-        self.transformer_encoder = nn.TransformerEncoder(
-            encoder_layer, num_layers=n_layers
-        )
+        # Custom transformer encoder layers using CustomMHA
+        self.layers = nn.ModuleList([
+            CustomTransformerEncoderLayer(
+                d_model=d_model,
+                n_heads=n_heads,
+                d_ff=d_ff,
+                dropout=dropout
+            ) for _ in range(n_layers)
+        ])
         
     def create_positional_embeddings(
         self, 
@@ -268,10 +360,12 @@ class EncodingModule(nn.Module):
         # Add color and positional embeddings
         embeddings = color_emb + pos_emb  # [batch_size, ctx_len, d_model]
         
-        # Pass through transformer encoder
-        encoded = self.transformer_encoder(embeddings)  # [batch_size, ctx_len, d_model]
+        # Pass through custom transformer encoder layers
+        x = embeddings
+        for layer in self.layers:
+            x = layer(x, positional_embedding=pos_emb)  # [batch_size, ctx_len, d_model]
         
-        return encoded
+        return x
     
     def forward_with_coordinates(
         self,
@@ -307,7 +401,9 @@ class EncodingModule(nn.Module):
         # Add color and positional embeddings
         embeddings = color_emb + pos_emb  # [1, ctx_len, d_model]
         
-        # Pass through transformer encoder
-        encoded = self.transformer_encoder(embeddings)  # [1, ctx_len, d_model]
+        # Pass through custom transformer encoder layers
+        x = embeddings
+        for layer in self.layers:
+            x = layer(x, positional_embedding=pos_emb)  # [1, ctx_len, d_model]
         
-        return encoded
+        return x

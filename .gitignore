@@ -6,3 +6,4 @@ nca-code/archived/
 .cursorignore
 hidden/
 nca-code/__pycache__/
+req.txt
