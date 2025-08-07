@@ -47,7 +47,7 @@ class TestCoordinateTransformations:
             positions = torch.tensor([[[i, j]]], dtype=torch.float)  # [1, 1, 2]
             
             # Get positional embeddings
-            pos_emb = self.model.create_positional_embeddings(positions, H, W)
+            pos_emb = self.model.create_positional_embeddings_input(positions, H, W)
             embedding = pos_emb[0, 0]  # [d_model]
             
             # Split into 4 parts
@@ -129,7 +129,7 @@ class TestCoordinateTransformations:
             print(f"\nTesting edge position ({i}, {j})")
             
             positions = torch.tensor([[[i, j]]], dtype=torch.float)
-            pos_emb = self.model.create_positional_embeddings(positions, H, W)
+            pos_emb = self.model.create_positional_embeddings_input(positions, H, W)
             
             # Should not raise errors and should produce finite values
             assert torch.isfinite(pos_emb).all(), f"Non-finite values at edge position ({i}, {j})"
@@ -157,7 +157,7 @@ class TestCoordinateTransformations:
         embeddings = []
         for i, j in positions:
             pos_tensor = torch.tensor([[[i, j]]], dtype=torch.float)
-            pos_emb = self.model.create_positional_embeddings(pos_tensor, H, W)
+            pos_emb = self.model.create_positional_embeddings_input(pos_tensor, H, W)
             embeddings.append(pos_emb[0, 0])  # [d_model]
         
         # All embeddings should be different
@@ -179,7 +179,7 @@ class TestCoordinateTransformations:
                 continue  # Skip if position is outside grid
                 
             positions = torch.tensor([[[i, j]]], dtype=torch.float)
-            pos_emb = self.model.create_positional_embeddings(positions, H, W)
+            pos_emb = self.model.create_positional_embeddings_input(positions, H, W)
             
             # Verify embedding is finite and has correct shape
             assert torch.isfinite(pos_emb).all()
@@ -208,7 +208,7 @@ class TestCoordinateTransformations:
         for i in range(0, H, 5):
             for j in range(0, W, 7):
                 positions = torch.tensor([[[i, j]]], dtype=torch.float)
-                pos_emb = self.model.create_positional_embeddings(positions, H, W)
+                pos_emb = self.model.create_positional_embeddings_input(positions, H, W)
                 
                 # Calculate actual transformations
                 t1 = (i, j)
@@ -280,7 +280,7 @@ class TestSpecificationCompliance:
         
         # Single position test
         positions = torch.tensor([[[5, 7]]], dtype=torch.float)
-        pos_emb = model.create_positional_embeddings(positions, H=10, W=12)
+        pos_emb = model.create_positional_embeddings_input(positions, H=10, W=12)
         
         embedding = pos_emb[0, 0]  # [d_model]
         d_pos = model.d_positional_input

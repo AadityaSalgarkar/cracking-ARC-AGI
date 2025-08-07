@@ -150,7 +150,7 @@ class TestEncodingModule:
         positions = torch.tensor([[[2, 3], [5, 7]]], dtype=torch.float)  # [1, 2, 2]
         H, W = 10, 12
         
-        pos_emb = self.model.create_positional_embeddings(positions, H, W)
+        pos_emb = self.model.create_positional_embeddings_input(positions, H, W)
         
         # Should have correct shape
         assert pos_emb.shape == (1, 2, self.d_model)
@@ -165,7 +165,7 @@ class TestEncodingModule:
         H, W = 5, 7
         positions = torch.tensor([[[i, j]]], dtype=torch.float)  # [1, 1, 2]
         
-        pos_emb = self.model.create_positional_embeddings(positions, H, W)
+        pos_emb = self.model.create_positional_embeddings_input(positions, H, W)
         
         # Extract the embedding for verification
         embedding = pos_emb[0, 0]  # [d_model]
@@ -208,7 +208,7 @@ class TestEncodingModule:
         
         # Get individual embeddings
         color_emb = self.model.color_embedding(colors)  # [1, 1, d_model]
-        pos_emb = self.model.create_positional_embeddings(positions, H=10, W=10)  # [1, 1, d_model]
+        pos_emb = self.model.create_positional_embeddings_input(positions, H=10, W=10)  # [1, 1, d_model]
         
         # Forward pass should add them
         output = self.model(colors, positions, H=10, W=10)
