@@ -334,7 +334,7 @@ def main():
     parser = argparse.ArgumentParser(description='Evaluate ARC PredictionModule')
     parser.add_argument('--checkpoint', type=str, required=True,
                         help='Path to model checkpoint')
-    parser.add_argument('--dataset', type=str, default='dataset/ARC-1',
+    parser.add_argument('--dataset', type=str, default='../dataset/ARC-1',
                         help='Path to ARC dataset')
     parser.add_argument('--split', type=str, default='evaluation',
                         choices=['training', 'evaluation', 'rearc-training'],
@@ -346,12 +346,21 @@ def main():
     parser.add_argument('--output-dir', type=str, default='evaluation_results',
                         help='Output directory for results')
     parser.add_argument('--device', type=str, default='cuda',
-                        help='Device to use (cuda/cpu)')
+                        help='Device to use (cuda/mps/cpu)')
     
     args = parser.parse_args()
     
-    # Set device
-    device = torch.device(args.device if torch.cuda.is_available() else 'cpu')
+    # Set device - check for CUDA, then MPS, then CPU
+    if args.device == 'cuda' and torch.cuda.is_available():
+        device = torch.device("cuda")
+    elif args.device == 'mps' and torch.backends.mps.is_available():
+        device = torch.device("mps")
+    elif torch.cuda.is_available():
+        device = torch.device("cuda")
+    elif torch.backends.mps.is_available():
+        device = torch.device("mps")
+    else:
+        device = torch.device("cpu")
     print(f"Using device: {device}")
     
     # Load model

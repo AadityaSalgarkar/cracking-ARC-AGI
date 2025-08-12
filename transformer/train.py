@@ -22,8 +22,7 @@ from torch.utils.data import Dataset, DataLoader, random_split
 from torch.optim.lr_scheduler import CosineAnnealingLR
 import numpy as np
 
-from layers import PredictionModule
-from classes import Puzzle
+from layers import PredictionModule, Puzzle
 
 
 class ARCDataset(Dataset):
@@ -447,18 +446,34 @@ def setup_gin_config():
 
 def main():
     """Main training function."""
+    import argparse
+    
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(description='Train ARC PredictionModule')
+    parser.add_argument('--max-tasks', type=int, default=1,
+                        help='Maximum number of tasks to use for training (default: 1)')
+    parser.add_argument('--batch-size', type=int, default=4,
+                        help='Batch size for training (default: 4)')
+    parser.add_argument('--epochs', type=int, default=50,
+                        help='Number of epochs to train (default: 50)')
+    parser.add_argument('--lr', type=float, default=1e-3,
+                        help='Learning rate (default: 1e-3)')
+    parser.add_argument('--dataset', type=str, default='../dataset/ARC-1',
+                        help='Path to dataset (default: ../dataset/ARC-1)')
+    args = parser.parse_args()
+    
     # Setup gin configuration
     setup_gin_config()
     
     # Training configuration
     config = {
-        'dataset_path': 'dataset/ARC-1',
-        'batch_size': 32,
-        'learning_rate': 1e-3,
-        'num_epochs': 50,
+        'dataset_path': args.dataset,
+        'batch_size': args.batch_size,
+        'learning_rate': args.lr,
+        'num_epochs': args.epochs,
         'warmup_epochs': 5,
         'weight_decay': 0.01,
-        'max_tasks': None,  # Use all tasks
+        'max_tasks': args.max_tasks,
         'checkpoint_dir': f'checkpoints/prediction_module_{datetime.now().strftime("%Y%m%d_%H%M%S")}',
         'log_interval': 10,
         'save_interval': 5
@@ -471,8 +486,13 @@ def main():
         print(f"  {key}: {value}")
     print("=" * 50)
     
-    # Set device
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    # Set device - check for CUDA, then MPS, then CPU
+    if torch.cuda.is_available():
+        device = torch.device("cuda")
+    elif torch.backends.mps.is_available():
+        device = torch.device("mps")
+    else:
+        device = torch.device("cpu")
     print(f"Using device: {device}")
     
     # Set random seeds
