@@ -184,25 +184,6 @@
             color: #333;
         }
         
-        #fileInput {
-            display: none;
-        }
-        
-        .file-label {
-            display: inline-block;
-            padding: 8px 12px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            border-radius: 5px;
-            cursor: pointer;
-            font-weight: 600;
-            transition: all 0.3s;
-        }
-        
-        .file-label:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
-        }
     </style>
 </head>
 <body>
@@ -212,9 +193,18 @@
         
         <div class="controls">
             <div class="control-group">
-                <label for="fileInput">Load Puzzle File</label>
-                <input type="file" id="fileInput" accept=".json">
-                <label for="fileInput" class="file-label">Choose File</label>
+                <label for="datasetSelect">Dataset</label>
+                <select id="datasetSelect">
+                    <option value="training">Training</option>
+                    <option value="evaluation">Evaluation</option>
+                </select>
+            </div>
+            
+            <div class="control-group">
+                <label for="puzzleSelect">Select Puzzle</label>
+                <select id="puzzleSelect">
+                    <option value="">Loading...</option>
+                </select>
             </div>
             
             <div class="control-group">
@@ -276,6 +266,7 @@
         </div>
     </div>
     
+    <script src="/transformer/puzzle_files.js"></script>
     <script>
         let currentPuzzle = null;
         let currentExample = null;
@@ -432,22 +423,59 @@
             loadExample();
         }
         
-        // File input handler
-        document.getElementById('fileInput').addEventListener('change', function(e) {
-            const file = e.target.files[0];
-            if (file) {
-                const reader = new FileReader();
-                reader.onload = function(e) {
-                    try {
-                        const puzzleData = JSON.parse(e.target.result);
-                        loadPuzzle(puzzleData);
-                    } catch (error) {
-                        alert('Error loading puzzle file: ' + error.message);
-                    }
-                };
-                reader.readAsText(file);
+        // Load puzzle from server
+        async function loadPuzzleFile(dataset, filename) {
+            try {
+                const response = await fetch(`/dataset/ARC-1/data/${dataset}/${filename}.json`);
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                const puzzleData = await response.json();
+                loadPuzzle(puzzleData);
+            } catch (error) {
+                console.error('Error loading puzzle:', error);
+                alert('Error loading puzzle: ' + error.message);
             }
-        });
+        }
+        
+        // Initialize puzzle selector
+        function initializePuzzleSelector() {
+            const datasetSelect = document.getElementById('datasetSelect');
+            const puzzleSelect = document.getElementById('puzzleSelect');
+            
+            function updatePuzzleList() {
+                const dataset = datasetSelect.value;
+                const puzzles = PUZZLE_FILES[dataset] || [];
+                
+                puzzleSelect.innerHTML = '';
+                puzzles.forEach(filename => {
+                    const option = document.createElement('option');
+                    option.value = filename;
+                    option.textContent = filename;
+                    puzzleSelect.appendChild(option);
+                });
+                
+                // Load first puzzle
+                if (puzzles.length > 0) {
+                    loadPuzzleFile(dataset, puzzles[0]);
+                }
+            }
+            
+            // Dataset change handler
+            datasetSelect.addEventListener('change', updatePuzzleList);
+            
+            // Puzzle selection handler
+            puzzleSelect.addEventListener('change', function() {
+                const dataset = datasetSelect.value;
+                const filename = puzzleSelect.value;
+                if (filename) {
+                    loadPuzzleFile(dataset, filename);
+                }
+            });
+            
+            // Initialize with training dataset
+            updatePuzzleList();
+        }
         
         // Example selector handler
         document.getElementById('exampleSelect').addEventListener('change', loadExample);
@@ -455,8 +483,14 @@
         // Display mode handler
         document.getElementById('showNumbers').addEventListener('change', loadExample);
         
-        // Load default puzzle on start
-        loadPuzzle(defaultPuzzle);
+        // Initialize on page load
+        if (typeof PUZZLE_FILES !== 'undefined') {
+            initializePuzzleSelector();
+        } else {
+            // Fallback to default puzzle if puzzle_files.js not loaded
+            console.warn('puzzle_files.js not found, using default puzzle');
+            loadPuzzle(defaultPuzzle);
+        }
     </script>
 </body>
 </html>
