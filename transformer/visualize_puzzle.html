@@ -1,0 +1,462 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ARC Puzzle Visualizer (30x30 Extended)</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 15px;
+            padding: 30px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+        }
+        
+        h1 {
+            text-align: center;
+            color: #333;
+            margin-bottom: 10px;
+        }
+        
+        .subtitle {
+            text-align: center;
+            color: #666;
+            margin-bottom: 30px;
+        }
+        
+        .controls {
+            display: flex;
+            justify-content: center;
+            gap: 20px;
+            margin-bottom: 30px;
+            flex-wrap: wrap;
+        }
+        
+        .control-group {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+        
+        label {
+            font-size: 12px;
+            color: #666;
+            font-weight: 600;
+        }
+        
+        select, input, button {
+            padding: 8px 12px;
+            border: 2px solid #ddd;
+            border-radius: 5px;
+            font-size: 14px;
+            transition: all 0.3s;
+        }
+        
+        select:hover, input:hover, button:hover {
+            border-color: #667eea;
+        }
+        
+        button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            cursor: pointer;
+            font-weight: 600;
+            border: none;
+        }
+        
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+        
+        .grids-container {
+            display: flex;
+            justify-content: space-around;
+            gap: 30px;
+            margin-top: 20px;
+        }
+        
+        .grid-wrapper {
+            flex: 1;
+            text-align: center;
+        }
+        
+        .grid-title {
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 10px;
+            color: #333;
+        }
+        
+        .grid-info {
+            font-size: 12px;
+            color: #666;
+            margin-bottom: 10px;
+        }
+        
+        .grid {
+            display: inline-grid;
+            gap: 0;
+            border: 3px solid #333;
+            background: #f0f0f0;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+        }
+        
+        .cell {
+            width: 18px;
+            height: 18px;
+            border: 0.5px solid #ccc;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 10px;
+            color: white;
+            font-weight: bold;
+            transition: transform 0.2s;
+        }
+        
+        .cell:hover {
+            transform: scale(1.5);
+            z-index: 10;
+            border: 1px solid #000;
+        }
+        
+        .cell.extended {
+            opacity: 0.3;
+        }
+        
+        .color-0 { background-color: #000000; }
+        .color-1 { background-color: #0074D9; }
+        .color-2 { background-color: #FF4136; }
+        .color-3 { background-color: #2ECC40; }
+        .color-4 { background-color: #FFDC00; }
+        .color-5 { background-color: #AAAAAA; }
+        .color-6 { background-color: #F012BE; }
+        .color-7 { background-color: #FF851B; }
+        .color-8 { background-color: #7FDBFF; }
+        .color-9 { background-color: #870C25; }
+        .color-10 { background-color: #FFFFFF; color: #333; }
+        
+        .stats {
+            margin-top: 30px;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 10px;
+        }
+        
+        .stats h3 {
+            margin-top: 0;
+            color: #333;
+        }
+        
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-top: 15px;
+        }
+        
+        .stat-item {
+            padding: 10px;
+            background: white;
+            border-radius: 5px;
+            border-left: 4px solid #667eea;
+        }
+        
+        .stat-label {
+            font-size: 12px;
+            color: #666;
+        }
+        
+        .stat-value {
+            font-size: 18px;
+            font-weight: bold;
+            color: #333;
+        }
+        
+        #fileInput {
+            display: none;
+        }
+        
+        .file-label {
+            display: inline-block;
+            padding: 8px 12px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-radius: 5px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: all 0.3s;
+        }
+        
+        .file-label:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎨 ARC Puzzle Visualizer</h1>
+        <p class="subtitle">Extends puzzles to 30x30 grid with padding</p>
+        
+        <div class="controls">
+            <div class="control-group">
+                <label for="fileInput">Load Puzzle File</label>
+                <input type="file" id="fileInput" accept=".json">
+                <label for="fileInput" class="file-label">Choose File</label>
+            </div>
+            
+            <div class="control-group">
+                <label for="exampleSelect">Select Example</label>
+                <select id="exampleSelect">
+                    <option value="train-0">Training 1</option>
+                </select>
+            </div>
+            
+            <div class="control-group">
+                <label for="showNumbers">Display Options</label>
+                <select id="showNumbers">
+                    <option value="none">Colors Only</option>
+                    <option value="values">Show Values</option>
+                    <option value="coords">Show Coordinates</option>
+                </select>
+            </div>
+            
+            <div class="control-group">
+                <label>&nbsp;</label>
+                <button onclick="toggleExtended()">Toggle Extended Area</button>
+            </div>
+        </div>
+        
+        <div class="grids-container">
+            <div class="grid-wrapper">
+                <div class="grid-title">Input Grid</div>
+                <div class="grid-info" id="inputInfo">Original: 0×0 | Extended: 30×30</div>
+                <div class="grid" id="inputGrid"></div>
+            </div>
+            
+            <div class="grid-wrapper">
+                <div class="grid-title">Output Grid</div>
+                <div class="grid-info" id="outputInfo">Original: 0×0 | Extended: 30×30</div>
+                <div class="grid" id="outputGrid"></div>
+            </div>
+        </div>
+        
+        <div class="stats">
+            <h3>📊 Puzzle Statistics</h3>
+            <div class="stats-grid">
+                <div class="stat-item">
+                    <div class="stat-label">Input Size</div>
+                    <div class="stat-value" id="inputSize">-</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-label">Output Size</div>
+                    <div class="stat-value" id="outputSize">-</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-label">Transformation</div>
+                    <div class="stat-value" id="transformation">-</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-label">Unique Colors</div>
+                    <div class="stat-value" id="uniqueColors">-</div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        let currentPuzzle = null;
+        let currentExample = null;
+        let showExtendedArea = true;
+        const MAX_SIZE = 30;
+        
+        // Default puzzle data
+        const defaultPuzzle = {
+            "test": [{"input": [[7, 0, 7], [7, 0, 7], [7, 7, 0]], 
+                     "output": [[7, 0, 7, 0, 0, 0, 7, 0, 7], [7, 0, 7, 0, 0, 0, 7, 0, 7], [7, 7, 0, 0, 0, 0, 7, 7, 0], [7, 0, 7, 0, 0, 0, 7, 0, 7], [7, 0, 7, 0, 0, 0, 7, 0, 7], [7, 7, 0, 0, 0, 0, 7, 7, 0], [7, 0, 7, 7, 0, 7, 0, 0, 0], [7, 0, 7, 7, 0, 7, 0, 0, 0], [7, 7, 0, 7, 7, 0, 0, 0, 0]]}],
+            "train": [
+                {"input": [[0, 7, 7], [7, 7, 7], [0, 7, 7]], 
+                 "output": [[0, 0, 0, 0, 7, 7, 0, 7, 7], [0, 0, 0, 7, 7, 7, 7, 7, 7], [0, 0, 0, 0, 7, 7, 0, 7, 7], [0, 7, 7, 0, 7, 7, 0, 7, 7], [7, 7, 7, 7, 7, 7, 7, 7, 7], [0, 7, 7, 0, 7, 7, 0, 7, 7], [0, 0, 0, 0, 7, 7, 0, 7, 7], [0, 0, 0, 7, 7, 7, 7, 7, 7], [0, 0, 0, 0, 7, 7, 0, 7, 7]]},
+                {"input": [[4, 0, 4], [0, 0, 0], [0, 4, 0]], 
+                 "output": [[4, 0, 4, 0, 0, 0, 4, 0, 4], [0, 0, 0, 0, 0, 0, 0, 0, 0], [0, 4, 0, 0, 0, 0, 0, 4, 0], [0, 0, 0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 4, 0, 4, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 4, 0, 0, 0, 0]]}
+            ]
+        };
+        
+        function extendGrid(grid, fillValue = 10) {
+            const originalH = grid.length;
+            const originalW = grid[0].length;
+            
+            // Create 30x30 grid filled with fillValue
+            const extended = Array(MAX_SIZE).fill().map(() => Array(MAX_SIZE).fill(fillValue));
+            
+            // Copy original grid to top-left corner
+            for (let i = 0; i < originalH; i++) {
+                for (let j = 0; j < originalW; j++) {
+                    extended[i][j] = grid[i][j];
+                }
+            }
+            
+            return { extended, originalH, originalW };
+        }
+        
+        function renderGrid(gridData, containerId, originalH, originalW) {
+            const container = document.getElementById(containerId);
+            const showMode = document.getElementById('showNumbers').value;
+            
+            container.innerHTML = '';
+            container.style.gridTemplateColumns = `repeat(${MAX_SIZE}, 1fr)`;
+            
+            for (let i = 0; i < MAX_SIZE; i++) {
+                for (let j = 0; j < MAX_SIZE; j++) {
+                    const cell = document.createElement('div');
+                    cell.className = `cell color-${gridData[i][j]}`;
+                    
+                    // Mark extended area
+                    if (i >= originalH || j >= originalW) {
+                        cell.classList.add('extended');
+                        if (!showExtendedArea) {
+                            cell.style.visibility = 'hidden';
+                        }
+                    }
+                    
+                    // Add text content based on display mode
+                    if (showMode === 'values') {
+                        cell.textContent = gridData[i][j] === 10 ? '' : gridData[i][j];
+                    } else if (showMode === 'coords') {
+                        cell.textContent = `${i},${j}`;
+                        cell.style.fontSize = '6px';
+                    }
+                    
+                    cell.title = `Position: (${i}, ${j}), Value: ${gridData[i][j]}`;
+                    container.appendChild(cell);
+                }
+            }
+        }
+        
+        function loadExample() {
+            const selectValue = document.getElementById('exampleSelect').value;
+            const [split, idx] = selectValue.split('-');
+            const example = currentPuzzle[split][parseInt(idx)];
+            currentExample = example;
+            
+            // Extend grids to 30x30
+            const { extended: inputExtended, originalH: inputH, originalW: inputW } = 
+                extendGrid(example.input);
+            const { extended: outputExtended, originalH: outputH, originalW: outputW } = 
+                extendGrid(example.output);
+            
+            // Render grids
+            renderGrid(inputExtended, 'inputGrid', inputH, inputW);
+            renderGrid(outputExtended, 'outputGrid', outputH, outputW);
+            
+            // Update info
+            document.getElementById('inputInfo').textContent = 
+                `Original: ${inputH}×${inputW} | Extended: 30×30`;
+            document.getElementById('outputInfo').textContent = 
+                `Original: ${outputH}×${outputW} | Extended: 30×30`;
+            
+            // Update stats
+            updateStats(example, inputH, inputW, outputH, outputW);
+        }
+        
+        function updateStats(example, inputH, inputW, outputH, outputW) {
+            document.getElementById('inputSize').textContent = `${inputH}×${inputW}`;
+            document.getElementById('outputSize').textContent = `${outputH}×${outputW}`;
+            
+            // Calculate transformation
+            let transformation = '';
+            if (outputH % inputH === 0 && outputW % inputW === 0) {
+                const scaleH = outputH / inputH;
+                const scaleW = outputW / inputW;
+                transformation = `${scaleH}×${scaleW} scaling`;
+            } else {
+                transformation = 'Complex';
+            }
+            document.getElementById('transformation').textContent = transformation;
+            
+            // Count unique colors
+            const allValues = new Set();
+            example.input.forEach(row => row.forEach(val => allValues.add(val)));
+            example.output.forEach(row => row.forEach(val => allValues.add(val)));
+            document.getElementById('uniqueColors').textContent = allValues.size;
+        }
+        
+        function toggleExtended() {
+            showExtendedArea = !showExtendedArea;
+            const extendedCells = document.querySelectorAll('.cell.extended');
+            extendedCells.forEach(cell => {
+                cell.style.visibility = showExtendedArea ? 'visible' : 'hidden';
+            });
+        }
+        
+        function loadPuzzle(puzzleData) {
+            currentPuzzle = puzzleData;
+            
+            // Update example selector
+            const selector = document.getElementById('exampleSelect');
+            selector.innerHTML = '';
+            
+            // Add training examples
+            if (puzzleData.train) {
+                puzzleData.train.forEach((_, idx) => {
+                    const option = document.createElement('option');
+                    option.value = `train-${idx}`;
+                    option.textContent = `Training ${idx + 1}`;
+                    selector.appendChild(option);
+                });
+            }
+            
+            // Add test examples
+            if (puzzleData.test) {
+                puzzleData.test.forEach((_, idx) => {
+                    const option = document.createElement('option');
+                    option.value = `test-${idx}`;
+                    option.textContent = `Test ${idx + 1}`;
+                    selector.appendChild(option);
+                });
+            }
+            
+            // Load first example
+            loadExample();
+        }
+        
+        // File input handler
+        document.getElementById('fileInput').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    try {
+                        const puzzleData = JSON.parse(e.target.result);
+                        loadPuzzle(puzzleData);
+                    } catch (error) {
+                        alert('Error loading puzzle file: ' + error.message);
+                    }
+                };
+                reader.readAsText(file);
+            }
+        });
+        
+        // Example selector handler
+        document.getElementById('exampleSelect').addEventListener('change', loadExample);
+        
+        // Display mode handler
+        document.getElementById('showNumbers').addEventListener('change', loadExample);
+        
+        // Load default puzzle on start
+        loadPuzzle(defaultPuzzle);
+    </script>
+</body>
+</html>
